@@ -22,6 +22,8 @@ type StemMixerProps = {
   onCentsChange: (v: number) => void
   preservePitch: boolean
   onPreservePitchChange: (v: boolean) => void
+  /** Switch from YouTube to the user's own copy of the audio. */
+  onAddAudio?: () => void
 }
 
 const SPEED_PRESETS = [0.5, 0.75, 1]
@@ -73,7 +75,16 @@ export function StemMixer(props: StemMixerProps) {
         <p className="mb-5 rounded-2xl border border-dashed border-line px-3 py-2.5 text-xs text-muted">
           {caps.stems
             ? 'Stem separation isn’t connected yet. It arrives with the backend.'
-            : 'Stems need an uploaded file. YouTube doesn’t share a video’s audio.'}
+            : 'Stems, pitch and the waveform need the audio itself, which YouTube doesn’t share.'}
+          {!caps.stems && props.onAddAudio && (
+            <button
+              type="button"
+              onClick={props.onAddAudio}
+              className="neu-soft mt-2.5 block w-full rounded-full px-3 py-1.5 text-xs text-ink transition-colors hover:text-accent"
+            >
+              Have the audio file? Switch to it
+            </button>
+          )}
         </p>
       )}
 

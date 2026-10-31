@@ -7,7 +7,7 @@ import { StemMixer } from './components/StemMixer'
 import { Transport } from './components/Transport'
 import { VideoPanel } from './components/VideoPanel'
 import { Waveform } from './components/Waveform'
-import { useSections } from './hooks/useSections'
+import { useSections, type SectionsState } from './hooks/useSections'
 import { addRecent, listRecents, loadProject, loadRecentFile, removeRecent, requestPersistentStorage, saveProject, type Recent } from './lib/storage'
 import type { Stem, Track } from './lib/types'
 import { formatTime, initialStems } from './lib/types'
@@ -29,6 +29,10 @@ function App() {
   /** Which track's saved work has been restored; saving waits for it so defaults never overwrite a project. */
   const [hydratedId, setHydratedId] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  /** Work to bring along when switching from a YouTube video to the user's audio file. */
+  const carryOver = useRef<{ from: string; work: SectionsState; speed: number } | null>(null)
+  /** Imported work the user can still shift to line up with the file. */
+  const [alignment, setAlignment] = useState<{ from: string; ids: Set<string>; markers: number[]; offset: number } | null>(null)
 
   const sec = useSections()
   const audio = usePlayer({ speed, semitones: pitch + cents / 100, preservePitch, loop: sec.activeLoop })
@@ -44,14 +48,19 @@ function App() {
   const resetWork = () => {
     setHydratedId(null)
     setNotice(null)
+    setAlignment(null)
     sec.restore(null)
   }
 
-  const afterLoad = async (loaded: Track | null, file?: File) => {
+  const afterLoad = async (loaded: Track | null, file?: File, carried?: typeof carryOver.current) => {
     if (!loaded) return
     const saved = await loadProject(loaded.id)
     sec.restore(saved ?? null)
-    setSpeed(saved?.speed ?? 1)
+    if (carried) {
+      const added = sec.merge(carried.work)
+      setAlignment({ from: carried.from, ...added, offset: 0 })
+    }
+    setSpeed(saved?.speed ?? carried?.speed ?? 1)
     setPitch(saved?.pitch ?? 0)
     setCents(saved?.cents ?? 0)
     setPreservePitch(saved?.preservePitch ?? true)
@@ -65,9 +74,26 @@ function App() {
     setRecents(await listRecents())
   }
 
-  const openFile = async (file: File) => {
+  const openFile = async (file: File, carried?: typeof carryOver.current) => {
     resetWork()
-    await afterLoad(await audio.loadFile(file), file)
+    await afterLoad(await audio.loadFile(file), file, carried)
+  }
+
+  /** From YouTube mode: pick the audio file and bring this video's work along. */
+  const switchToFile = () => {
+    if (!track) return
+    carryOver.current = {
+      from: track.name,
+      work: { sections: sec.sections, markers: sec.markers, loop: sec.loop, loopOn: sec.loopOn },
+      speed,
+    }
+    fileInput.current?.click()
+  }
+
+  const shiftImported = (delta: number) => {
+    if (!alignment) return
+    const markers = sec.shift(delta, duration, alignment.ids, alignment.markers)
+    setAlignment({ ...alignment, markers, offset: Math.round((alignment.offset + delta) * 10) / 10 })
   }
 
   const openYouTube = async (link: string) => {
@@ -164,11 +190,16 @@ function App() {
       const file = e.dataTransfer?.files[0]
       if (file) void openFileRef.current(file)
     }
+    // Picker dismissed: don't carry work into whatever file is opened next.
+    const cancel = () => (carryOver.current = null)
+    const input = fileInput.current!
+    input.addEventListener('cancel', cancel)
     window.addEventListener('keydown', key)
     window.addEventListener('dragover', over)
     window.addEventListener('dragleave', leave)
     window.addEventListener('drop', drop)
     return () => {
+      input.removeEventListener('cancel', cancel)
       window.removeEventListener('keydown', key)
       window.removeEventListener('dragover', over)
       window.removeEventListener('dragleave', leave)
@@ -209,7 +240,9 @@ function App() {
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0]
-          if (file) void openFile(file)
+          const carried = carryOver.current
+          carryOver.current = null
+          if (file) void openFile(file, carried)
           e.target.value = ''
         }}
       />
@@ -292,6 +325,16 @@ function App() {
                 </div>
               )}
 
+              {audio.ready && alignment && (
+                <AlignBar
+                  from={alignment.from}
+                  count={alignment.ids.size + alignment.markers.length}
+                  offset={alignment.offset}
+                  onShift={shiftImported}
+                  onDone={() => setAlignment(null)}
+                />
+              )}
+
               {audio.ready && (
                 <Waveform
                   key={track.id}
@@ -309,6 +352,7 @@ function App() {
                   onSeek={audio.seek}
                   onLoopChange={sec.changeLoop}
                   onDoubleClickAt={(t) => audio.seek(sec.loopBetweenMarkers(t, duration))}
+                  onAddAudio={track.source === 'youtube' ? switchToFile : undefined}
                 />
               )}
 
@@ -389,6 +433,7 @@ function App() {
             onCentsChange={setCents}
             preservePitch={preservePitch}
             onPreservePitchChange={setPreservePitch}
+            onAddAudio={track?.source === 'youtube' ? switchToFile : undefined}
           />
         </div>
       </main>
@@ -412,6 +457,50 @@ function LoopEdge({ label, value, onNudge }: { label: string; value: number; onN
         </button>
       </div>
     </div>
+  )
+}
+
+/** Shown after switching from YouTube: shift the imported work until it lines up with the file. */
+function AlignBar({ from, count, offset, onShift, onDone }: { from: string; count: number; offset: number; onShift: (d: number) => void; onDone: () => void }) {
+  const steps = [-1, -0.1, 0.1, 1]
+  return (
+    <div className="neu-inset mb-3 flex items-center gap-3 rounded-2xl py-2 pr-2 pl-4 text-xs">
+      <p
+        className="min-w-0 flex-1 truncate text-muted"
+        title={`Brought ${count} ${count === 1 ? 'item' : 'items'} over from “${from}”. If they're early or late here, shift them.`}
+      >
+        {count} from <span className="text-ink">“{from}”</span> · line up:
+      </p>
+      <div className="flex items-center gap-1.5">
+        {steps.slice(0, 2).map((d) => (
+          <AlignButton key={d} delta={d} onShift={onShift} />
+        ))}
+        <span className="w-14 text-center font-mono text-xs text-ink">
+          {offset > 0 ? '+' : ''}
+          {offset.toFixed(1)}s
+        </span>
+        {steps.slice(2).map((d) => (
+          <AlignButton key={d} delta={d} onShift={onShift} />
+        ))}
+        <button type="button" onClick={onDone} className="neu-soft ml-1 rounded-full px-3 py-1 text-xs text-accent">
+          Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AlignButton({ delta, onShift }: { delta: number; onShift: (d: number) => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Shift ${delta > 0 ? 'later' : 'earlier'} by ${Math.abs(delta)} seconds`}
+      onClick={() => onShift(delta)}
+      className="neu-soft rounded-full px-2 py-1 font-mono text-[11px] text-muted hover:text-ink"
+    >
+      {delta > 0 ? '+' : '−'}
+      {Math.abs(delta)}
+    </button>
   )
 }
 

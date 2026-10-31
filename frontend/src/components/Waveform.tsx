@@ -21,6 +21,8 @@ type WaveformProps = {
   /** `new` when drawing a fresh loop, `edit` when dragging an existing edge. */
   onLoopChange: (range: Range, kind: 'new' | 'edit') => void
   onDoubleClickAt: (t: number) => void
+  /** Offered in place of the waveform when there's no audio data (YouTube). */
+  onAddAudio?: () => void
 }
 
 type Drag = { mode: 'new' | 'start' | 'end'; anchor: number; x: number; moved: boolean }
@@ -210,9 +212,18 @@ export function Waveform(p: WaveformProps) {
           ) : (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <div className="absolute inset-x-0 top-1/2 h-px bg-line" />
-              <span className="relative rounded-full bg-deep px-3 py-1 text-[11px] text-faint">
-                No waveform for YouTube videos
-              </span>
+              {p.onAddAudio ? (
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={p.onAddAudio}
+                  className="pointer-events-auto relative rounded-full bg-deep px-3 py-1 text-[11px] text-muted ring-1 ring-line transition-colors hover:text-accent hover:ring-accent/50"
+                >
+                  No waveform for YouTube · add the audio file
+                </button>
+              ) : (
+                <span className="relative rounded-full bg-deep px-3 py-1 text-[11px] text-faint">No waveform for YouTube videos</span>
+              )}
             </div>
           )}
 

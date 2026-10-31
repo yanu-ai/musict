@@ -36,6 +36,40 @@ export function useSections() {
     setEditingId(null)
   }
 
+  /**
+   * Adds work carried over from another source (e.g. the YouTube version of
+   * this song) alongside what's already here. Returns what was added, for shift().
+   */
+  const merge = (incoming: SectionsState): { ids: Set<string>; markers: number[] } => {
+    const added = incoming.sections.map((s) => ({ ...s, id: crypto.randomUUID() }))
+    setSections((all) => [...all, ...added].sort((a, b) => a.start - b.start))
+    setMarkers((all) => [...new Set([...all, ...incoming.markers])].sort((a, b) => a - b))
+    if (incoming.loop) {
+      setLoop(incoming.loop)
+      setLoopOn(incoming.loopOn)
+      const match = added.find((s) => s.start === incoming.loop!.start && s.end === incoming.loop!.end)
+      setActiveId(match ? match.id : null)
+    }
+    return { ids: new Set(added.map((s) => s.id)), markers: incoming.markers }
+  }
+
+  /**
+   * Moves the given sections and markers (and the loop) by `delta` seconds, to
+   * line imported work up with this file. Returns the markers' new times.
+   */
+  const shift = (delta: number, duration: number, ids: Set<string>, importedMarkers: number[]): number[] => {
+    const move = (t: number) => round1(Math.min(duration, Math.max(0, t + delta)))
+    setSections((all) =>
+      all
+        .map((s) => (ids.has(s.id) ? { ...s, start: move(s.start), end: Math.max(move(s.end), move(s.start) + MIN_LOOP) } : s))
+        .sort((a, b) => a.start - b.start),
+    )
+    const moved = importedMarkers.map(move)
+    setMarkers((all) => [...all.filter((m) => !importedMarkers.includes(m)), ...moved].sort((a, b) => a - b))
+    setLoop((l) => l && { start: move(l.start), end: Math.max(move(l.end), move(l.start) + MIN_LOOP) })
+    return moved
+  }
+
   /** `new` draws a fresh loop; `edit` moves the current one (and its section). */
   const changeLoop = (range: Range, kind: 'new' | 'edit') => {
     const r = { start: round1(range.start), end: round1(range.end) }
@@ -123,6 +157,8 @@ export function useSections() {
     editingId,
     setEditingId,
     restore,
+    merge,
+    shift,
     changeLoop,
     nudge,
     clearLoop,
