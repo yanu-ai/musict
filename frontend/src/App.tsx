@@ -8,7 +8,7 @@ import { Transport } from './components/Transport'
 import { VideoPanel } from './components/VideoPanel'
 import { Waveform } from './components/Waveform'
 import { useSections } from './hooks/useSections'
-import { addRecent, listRecents, loadProject, loadRecentFile, removeRecent, saveProject, type Recent } from './lib/storage'
+import { addRecent, listRecents, loadProject, loadRecentFile, removeRecent, requestPersistentStorage, saveProject, type Recent } from './lib/storage'
 import type { Stem, Track } from './lib/types'
 import { formatTime, initialStems } from './lib/types'
 
@@ -59,6 +59,7 @@ function App() {
     setMirrored(saved?.mirrored ?? false)
     setZoom(saved?.zoom ?? 1)
     setHydratedId(loaded.id)
+    void requestPersistentStorage()
     const videoId = loaded.source === 'youtube' ? loaded.id.slice(3) : undefined
     await addRecent({ id: loaded.id, name: loaded.name, source: loaded.source, videoId, openedAt: Date.now() }, file)
     setRecents(await listRecents())

@@ -34,6 +34,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 export function Waveform(p: WaveformProps) {
   const area = useRef<HTMLDivElement>(null)
   const drag = useRef<Drag | null>(null)
+  /** Pinch scale seen so far in the current Safari gesture. */
+  const gestureScale = useRef(1)
   const [width, setWidth] = useState(600)
   const [view, setView] = useState<Range>({ start: 0, end: p.duration })
   const viewLen = view.end - view.start
@@ -77,8 +79,24 @@ export function Waveform(p: WaveformProps) {
         panBy(((e.shiftKey ? e.deltaY : e.deltaX) / r.width) * viewLen)
       }
     }
+    // Safari reports trackpad pinches as its own gesture events rather than ctrl+wheel,
+    // and zooms the whole page unless they're cancelled.
+    const onGesture = (e: Event) => {
+      const g = e as Event & { scale: number; clientX: number }
+      e.preventDefault()
+      if (e.type === 'gesturestart') gestureScale.current = 1
+      else if (e.type === 'gesturechange' && g.scale > 0) {
+        const r = el.getBoundingClientRect()
+        zoomAround(view.start + ((g.clientX - r.left) / r.width) * viewLen, gestureScale.current / g.scale)
+        gestureScale.current = g.scale
+      }
+    }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    for (const type of ['gesturestart', 'gesturechange', 'gestureend']) el.addEventListener(type, onGesture)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      for (const type of ['gesturestart', 'gesturechange', 'gestureend']) el.removeEventListener(type, onGesture)
+    }
   })
 
   // = / - zoom around the playhead, 0 fits the whole song.

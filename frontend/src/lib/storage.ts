@@ -48,18 +48,39 @@ export const saveProject = (id: string, project: Project) => safe(() => set(id, 
 
 export const listRecents = () => safe(async () => (await get<Recent[]>('recents', meta)) ?? [], [] as Recent[])
 
+/**
+ * Files are stored as raw bytes: Safari rejects Blob/File values in IndexedDB
+ * in some contexts (private windows, automation) with "BlobURLs are not yet supported".
+ */
+type StoredFile = { name: string; type: string; lastModified: number; data: ArrayBuffer }
+
 export async function addRecent(recent: Recent, file?: File) {
-  await safe(async () => {
-    const previous = (await get<Recent[]>('recents', meta)) ?? []
-    const rest = previous.filter((r) => r.id !== recent.id)
-    const next = [recent, ...rest].slice(0, MAX_RECENTS)
-    if (file && file.size <= MAX_STORED_FILE) await set(recent.id, file, files)
-    for (const dropped of rest.slice(MAX_RECENTS - 1)) await del(dropped.id, files)
-    await set('recents', next, meta)
-  }, undefined)
+  const previous = await listRecents()
+  const rest = previous.filter((r) => r.id !== recent.id)
+  await safe(() => set('recents', [recent, ...rest].slice(0, MAX_RECENTS), meta), undefined)
+  for (const dropped of rest.slice(MAX_RECENTS - 1)) await safe(() => del(dropped.id, files), undefined)
+  // Separate from the list above so a failed (e.g. over-quota) file save never loses the list.
+  if (file && file.size <= MAX_STORED_FILE) {
+    await safe(async () => {
+      const stored: StoredFile = { name: file.name, type: file.type, lastModified: file.lastModified, data: await file.arrayBuffer() }
+      await set(recent.id, stored, files)
+    }, undefined)
+  }
 }
 
-export const loadRecentFile = (id: string) => safe(() => get<File>(id, files), undefined)
+export const loadRecentFile = (id: string) =>
+  safe(async () => {
+    const stored = await get<StoredFile | File>(id, files)
+    // Entries saved before the raw-bytes format are File objects already.
+    if (!stored || stored instanceof File) return stored
+    return new File([stored.data], stored.name, { type: stored.type, lastModified: stored.lastModified })
+  }, undefined)
+
+/**
+ * Asks the browser not to evict our storage. Without this, Safari may clear a
+ * site's data after 7 days without a visit, taking saved sections with it.
+ */
+export const requestPersistentStorage = () => safe(async () => (await navigator.storage?.persist?.()) ?? false, false)
 
 export async function removeRecent(id: string) {
   await safe(async () => {
