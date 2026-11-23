@@ -1,0 +1,11 @@
+// Cloudflare Workers config: serve the built site (dist/) as static files.
+// Response headers, including cross-origin isolation, come from public/_headers.
+{
+  "name": "musict",
+  "compatibility_date": "2026-11-19",
+  "assets": {
+    "directory": "./dist",
+    // Unknown paths such as /youtube/ get index.html, and the app routes from there.
+    "not_found_handling": "single-page-application"
+  }
+}
