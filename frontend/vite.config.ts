@@ -2,13 +2,13 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Connect, type Plugin } from 'vite'
 
-// Served from https://yanu-ai.github.io/musict/ on GitHub Pages.
-const base = '/musict/'
+// Served from the root of its own domain on Cloudflare Pages.
+const base = '/'
 
 /**
  * Cross-origin isolation (COOP + COEP) lets stem separation use several CPU
  * threads, but it blocks the YouTube player. So every page gets the headers
- * except YouTube mode, under /youtube/.
+ * except YouTube mode, under /youtube/. Cloudflare does the same with public/_headers.
  */
 function crossOriginIsolation(): Plugin {
   const addHeaders: Connect.NextHandleFunction = (req, res, next) => {

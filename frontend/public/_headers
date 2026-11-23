@@ -1,0 +1,12 @@
+# Cloudflare Pages response headers (copied into dist/ by Vite).
+# Cross-origin isolation lets stem separation use several CPU threads, but it
+# blocks the YouTube player, so YouTube mode (/youtube/) is served without it.
+# The dev server does the same in vite.config.ts.
+
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+/youtube/*
+  ! Cross-Origin-Opener-Policy
+  ! Cross-Origin-Embedder-Policy
