@@ -162,6 +162,8 @@ export function usePlayer({ speed, semitones, preservePitch, loop }: Settings) {
   const capabilities: Capabilities = player?.capabilities ?? engine.capabilities
 
   return {
+    /** The file engine, e.g. for stems. Always the same instance. */
+    engine,
     track,
     ready: !!player,
     capabilities,

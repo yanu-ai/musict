@@ -10,14 +10,17 @@ drums, bass, guitar, piano, other) to hear parts clearly.
   built and deployed by Cloudflare on every push to `main` (`frontend/wrangler.jsonc`).
 - Audio: Web Audio API + signalsmith-stretch (time-stretch, pitch shift and
   gapless looping on the audio thread). Per-song work saved in IndexedDB (idb-keyval).
-- Stem separation (spike done, not built): Demucs in the browser via `demucs-web` +
-  `onnxruntime-web`. See design below.
+- Stem separation: HT-Demucs 6-stem (ONNX) in the browser with `onnxruntime-web`,
+  in a Web Worker, with our own chunking (`frontend/src/separation/`). See design below.
 - Later: Docker for self-hosting.
 
 ## Current state
 - Player v1 works: open a file or YouTube link, waveform, sections and markers,
   A–B loop, speed and pitch with pitch preservation, recents, projects saved per song.
-- `StemMixer` UI exists but is disabled: `App.tsx` passes `backendReady={false}`.
+- Stems work for uploaded files (build plan steps 1–3 done): "Separate stems" with a
+  one-time OK for the model download, then optional auto-start for new songs. The
+  current loop is separated first and playable early; moving the loop moves the work.
+  `StemMixer` faders, mute and solo drive per-stem volumes in the engine.
 - YouTube mode can't use stems (YouTube doesn't share raw audio):
   `YouTubePlayer.capabilities.stems` is false. Stems are for uploaded files only.
 - TypeScript pinned to ~6.0 because typescript-eslint doesn't support TS 7 yet.
@@ -33,7 +36,7 @@ Headers are set per path by `frontend/public/_headers` (Cloudflare) and a plugin
 `frontend/vite.config.ts` (dev/preview). Self-hosting (nginx) must do the same.
 Moving between modes is a page load; a file opened from YouTube mode is handed to
 `/` through IndexedDB (`saveHandoff`/`takeHandoff` in `lib/storage.ts`, routes in
-`lib/routes.ts`). `frontend/spike.html` + `src/spike.ts` is the throwaway speed test.
+`lib/routes.ts`).
 
 ## Stem separation design (decided)
 One **Separator** interface (audio in, stems out, progress reported) with three
@@ -45,47 +48,60 @@ Order of preference:
    (htdemucs_ft, maybe a RoFormer "HQ mode"), fast on NVIDIA GPUs (Linux/Windows).
    Docker on a Mac can't reach the GPU, so it's CPU-only there (better quality, slower).
    The server reports its device and models so the UI can say what it's using.
-2. **Browser**: Demucs exported to ONNX, run with onnxruntime-web via the
-   `demucs-web` package. Default on the public site. Costs $0 at any scale and the
-   audio never leaves the device. Spike results (30 s clip, M3 MacBook Air, 8 GB):
-   - CPU, 4 threads (isolated): 23 s Chrome, 27 s Safari 17. This is the path to build on.
-   - CPU, 1 thread (not isolated): 69 s Chrome, 392 s Safari.
-   - WebGPU (Chrome): 97–141 s, erratic; likely memory pressure on 8 GB. Retest on more RAM.
-   - Adds 0.6–2 GB of memory. Must run in a Web Worker (it blocks the page otherwise).
-   - `demucs-web` only ships 4-stem `htdemucs` (piano/guitar land in "other") and
-     processes one extra segment (a small bug).
+2. **Browser** (built: `BrowserSeparator`): HT-Demucs 6-stem exported to ONNX, run with
+   onnxruntime-web (WASM, CPU) in a Web Worker. Default on the public site. Costs $0 at
+   any scale and the audio never leaves the device. How it works:
+   - `chunks.ts` cuts the song into 7.8 s chunks overlapping by 1/4, crossfaded so the
+     overlaps sum to 1; chunks touching the loop go first (`nextChunk`).
+   - The page sends one chunk at a time to the worker (`browser.worker.ts`), so the
+     worker never holds the whole song; one worker per job, freed at the end.
+   - ORT's graph optimizer runs out of memory on this model (`std::bad_alloc`), so
+     `graphOptimizationLevel: 'disabled'`. ORT's 29.5 MB `.wasm` loads from jsDelivr
+     (Cloudflare's 25 MiB file limit); its small `.mjs` must stay same-origin.
+   - Speed on the M3 MacBook Air (8 GB), foreground tab, 4 threads: model load ~10 s,
+     ~3.8 s per 7.8 s chunk (~2x real time). Auto-started jobs use 2 threads.
+   - **Speed depends on Chrome treating the tab as foreground.** Background tabs get
+     low OS priority (efficiency cores, ~6x slower). Timings from Claude's automated
+     tab are unreliable; earlier "production build is 7x slower" was this artifact.
+   - Without cross-origin isolation it's single-threaded and much slower.
+   - Separation is capped at 10 minutes of audio (memory).
 3. **ZeroGPU**: a Hugging Face Space (Gradio + `@spaces.GPU`) for devices that
    can't run it locally. Each visitor has a small daily GPU quota.
 
 A setting lets the user override: Automatic / This browser / Local server.
 
-Model: Demucs. `htdemucs` (4 stems) or `htdemucs_6s` (adds guitar and piano,
-which are weaker). Test both before choosing the default. RoFormer models are
-better quality but large and some weights are non-commercial: server-only, later.
+Model (decided): `htdemucs_6s` (vocals, drums, bass, other, guitar, piano), the MIT
+ONNX export by StemSplitio (`htdemucs_6s_fp16weights.onnx`, 136 MB). Piano is the
+weakest stem. RoFormer models are better quality but large and some weights are
+non-commercial: server-only, later.
+
+Playback (decided): one 12-channel signalsmith-stretch node (6 stems × L/R) with a
+GainNode per stem after stretching, so stems never drift and faders are instant.
+"Other" is rebuilt as mix minus the other five, so stems sum exactly to the original
+("stems off" = all gains 1). The engine runs at 44.1 kHz, the model's rate.
 
 Rules:
-- Ask before downloading the model (172 MiB / 181 MB). Download on first "Separate", not on
-  page load. Host it on the Hugging Face Hub with a versioned filename.
+- Ask before downloading the model (136 MB). Download on first "Separate", not on
+  page load. TODO: host our own copy on the Hugging Face Hub with a versioned filename
+  (it currently loads from StemSplitio's repo).
 - Cache stems per song so nothing is separated twice.
 - Servers delete uploaded audio right after processing and never store or re-serve it.
 - One Python separation app (Gradio) serves both ZeroGPU and the Docker backend.
 - No Kubernetes: there are no servers of our own to orchestrate.
 
 Open questions (decide when we get there):
-- Stem playback: one multichannel signalsmith-stretch node vs one per stem,
-  keeping stems in sync with speed, pitch and loop.
 - Stem storage size: 6 stereo float32 stems of a 4-minute song is ~500 MB.
   Compress before caching.
 - Cache key: `Track.id` is name + size; a content hash would be safer.
-- Max song length for separation (the engine allows 20 minutes; memory won't).
+- Keep the worker (and loaded model) alive between songs to skip the ~10 s load?
+- Pre-optimize the ONNX model offline (e.g. Colab) to win back the graph optimizer.
 
 ## Build plan
-1. Browser separator: `demucs-web` (4 stems) separating an uploaded file,
-   behind the Separator interface.
-2. Stem playback: wire stems into the engine and enable `StemMixer`
-   (level, mute, solo), in sync with speed, pitch and loop.
-3. Try `htdemucs_6s` and pick the default stem set.
-4. UX: download consent, progress, cancel, caching.
+1. ~~Browser separator behind the Separator interface.~~ Done.
+2. ~~Stem playback in the engine, `StemMixer` enabled.~~ Done.
+3. ~~Try `htdemucs_6s` and pick the default stem set.~~ Done: 6-stem.
+4. UX: ~~download consent, progress, cancel~~ (done); caching stems per song (todo),
+   so reopening a song doesn't separate again.
 5. Measure on a few devices; write up the tradeoffs in the README.
 6. Docker level 1: frontend served by nginx (multi-stage build), with the same
    per-path isolation headers as `public/_headers`.

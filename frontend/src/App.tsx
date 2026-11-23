@@ -1,15 +1,18 @@
 import { AudioLines, FileAudio, Film, Minus, Play, Plus, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { stemGains } from './audio/stems'
 import { usePlayer } from './audio/usePlayer'
 import { parseYouTubeId } from './audio/youtube'
 import { DropZone } from './components/DropZone'
 import { SectionsPanel } from './components/SectionsPanel'
+import { SeparationPanel } from './components/SeparationPanel'
 import { StemMixer } from './components/StemMixer'
 import { Transport } from './components/Transport'
 import { VideoPanel } from './components/VideoPanel'
 import { Waveform } from './components/Waveform'
 import { useSections } from './hooks/useSections'
 import { homeUrl, isYouTubePage, videoIdInUrl, youTubeUrl } from './lib/routes'
+import { useSeparation } from './separation/useSeparation'
 import {
   addRecent,
   listRecents,
@@ -54,6 +57,10 @@ function App() {
   const audio = usePlayer({ speed, semitones: pitch + cents / 100, preservePitch, loop: sec.activeLoop })
   const { track, time, capabilities: caps } = audio
   const duration = track?.duration ?? 0
+  const separation = useSeparation({ engine: audio.engine, track, loop: sec.activeLoop, onStemsReady: () => setStemsOn(true) })
+
+  // Mixer settings → stem volumes (all at full volume when stems are off, i.e. the original).
+  useEffect(() => audio.engine.setStemGains(stemGains(stems, stemsOn)), [audio.engine, stems, stemsOn])
 
   useEffect(() => {
     void listRecents().then(setRecents)
@@ -63,6 +70,7 @@ function App() {
 
   const resetWork = () => {
     setHydratedId(null)
+    setStemsOn(false)
     setNotice(null)
     setAlignment(null)
     sec.restore(null)
@@ -467,7 +475,19 @@ function App() {
         <div className="lg:order-3 lg:min-h-0">
           <StemMixer
             capabilities={caps}
-            backendReady={false}
+            stemsReady={separation.stemsLoaded}
+            separation={
+              <SeparationPanel
+                status={separation.status}
+                stemsLoaded={separation.stemsLoaded}
+                onSeparate={separation.request}
+                onConfirm={separation.confirm}
+                onCancel={separation.cancel}
+              />
+            }
+            separatorLabel={separation.label}
+            autoSeparate={separation.autoSeparate}
+            onAutoSeparateChange={separation.setAutoSeparate}
             stems={stems}
             onStemChange={(id, patch) => setStems((all) => all.map((s) => (s.id === id ? { ...s, ...patch } : s)))}
             stemsOn={stemsOn}

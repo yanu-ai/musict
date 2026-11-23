@@ -1,5 +1,5 @@
 import { Check, Minus, Plus, SlidersHorizontal } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { Capabilities } from '../audio/player'
 import type { Stem } from '../lib/types'
 import { Fader } from './Fader'
@@ -8,8 +8,14 @@ import { Toggle } from './Toggle'
 
 type StemMixerProps = {
   capabilities: Capabilities
-  /** False until the separation backend exists. */
-  backendReady: boolean
+  /** Stems for this song are playable, so the toggle and faders work. */
+  stemsReady: boolean
+  /** Start / progress / errors for separation, shown above the faders. */
+  separation: ReactNode
+  /** Where separation runs, e.g. "This browser · CPU, multi-threaded". */
+  separatorLabel: string
+  autoSeparate: boolean
+  onAutoSeparateChange: (v: boolean) => void
   stems: Stem[]
   onStemChange: (id: string, patch: Partial<Stem>) => void
   stemsOn: boolean
@@ -46,7 +52,7 @@ export function StemMixer(props: StemMixerProps) {
   const shown = stems.filter((s) => s.shown)
   const anySolo = shown.some((s) => s.solo)
   const pickable = stems.filter((s) => s.id !== 'rest')
-  const stemsUsable = caps.stems && props.backendReady
+  const stemsUsable = caps.stems && props.stemsReady
   const speedStep = Math.max(0.05, caps.speedStep)
   const snapSpeed = (v: number) => Math.round(v / caps.speedStep) * caps.speedStep
 
@@ -71,12 +77,12 @@ export function StemMixer(props: StemMixerProps) {
         </div>
       </div>
 
-      {!stemsUsable && (
+      {caps.stems && props.separation}
+
+      {!caps.stems && (
         <p className="mb-5 rounded-2xl border border-dashed border-line px-3 py-2.5 text-xs text-muted">
-          {caps.stems
-            ? 'Stem separation isn’t connected yet. It arrives with the backend.'
-            : 'Stems, pitch and the waveform need the audio itself, which YouTube doesn’t share.'}
-          {!caps.stems && props.onAddAudio && (
+          Stems, pitch and the waveform need the audio itself, which YouTube doesn’t share.
+          {props.onAddAudio && (
             <button
               type="button"
               onClick={props.onAddAudio}
@@ -90,7 +96,7 @@ export function StemMixer(props: StemMixerProps) {
 
       {picking && (
         <div className="neu-inset mb-5 rounded-2xl p-3">
-          <p className="mb-2.5 text-xs text-muted">Pull out these instruments. Everything else stays in Rest.</p>
+          <p className="mb-2.5 text-xs text-muted">Pull out these instruments. Everything else plays in Rest.</p>
           <div className="flex flex-wrap gap-1.5">
             {pickable.map((s) => (
               <button
@@ -107,6 +113,20 @@ export function StemMixer(props: StemMixerProps) {
               </button>
             ))}
           </div>
+          {caps.stems && (
+            <div className="mt-3 border-t border-line pt-3 text-xs text-muted">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={props.autoSeparate}
+                  onChange={(e) => props.onAutoSeparateChange(e.target.checked)}
+                  className="accent-accent"
+                />
+                Separate new songs automatically
+              </label>
+              <p className="mt-1.5 text-[11px] text-faint">{props.separatorLabel}</p>
+            </div>
+          )}
         </div>
       )}
 

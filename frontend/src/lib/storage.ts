@@ -47,6 +47,10 @@ async function safe<T>(op: () => Promise<T>, fallback: T): Promise<T> {
 export const loadProject = (id: string) => safe(() => get<Project>(id, projects), undefined)
 export const saveProject = (id: string, project: Project) => safe(() => set(id, project, projects), undefined)
 
+/** Whether newly opened songs start separating by themselves (set at the first "Separate stems"). */
+export const getAutoSeparate = () => safe(async () => (await get<boolean>('autoSeparate', meta)) ?? false, false)
+export const setAutoSeparate = (on: boolean) => safe(() => set('autoSeparate', on, meta), undefined)
+
 export const listRecents = () => safe(async () => (await get<Recent[]>('recents', meta)) ?? [], [] as Recent[])
 
 /**

@@ -37,6 +37,8 @@ export class AudioEngine implements Player {
   private mixNode: SignalsmithStretchNode | null = null
   private stemNode: Promise<SignalsmithStretchNode> | null = null
   private stemGains = new Map<StemName, GainNode>()
+  /** Last volumes asked for, so they apply even if the stems node is created later. */
+  private gainValues: Partial<Record<StemName, number>> = {}
   private ready: Promise<SignalsmithStretchNode> | null = null
   private loadId = 0
   /** The decoded file, kept for building stems and for separation. */
@@ -159,6 +161,7 @@ export class AudioEngine implements Player {
 
   /** Volume per stem (1 = as separated). Smoothed over ~15 ms so changes don't click. */
   setStemGains(gains: Partial<Record<StemName, number>>) {
+    this.gainValues = { ...this.gainValues, ...gains }
     if (!this.ctx) return
     for (const [name, value] of Object.entries(gains)) {
       this.stemGains.get(name as StemName)?.gain.setTargetAtTime(value, this.ctx.currentTime, 0.015)
@@ -193,6 +196,7 @@ export class AudioEngine implements Player {
         split.connect(pair, i * 2, 0)
         split.connect(pair, i * 2 + 1, 1)
         const gain = ctx.createGain()
+        gain.gain.value = this.gainValues[name] ?? 1
         pair.connect(gain).connect(ctx.destination)
         this.stemGains.set(name, gain)
       })
