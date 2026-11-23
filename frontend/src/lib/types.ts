@@ -23,15 +23,19 @@ export type Track = {
   details: string[]
 }
 
-// Stems the separator can pull out. Anything not shown is summed into `rest`.
+// The six stems the separator makes, plus Rest: stems you don't pick play through the Rest fader.
 export const initialStems: Stem[] = [
   { id: 'vocals', name: 'Vocals', level: 0.8, muted: false, solo: false, shown: true },
   { id: 'drums', name: 'Drums', level: 0.8, muted: false, solo: false, shown: true },
   { id: 'bass', name: 'Bass', level: 0.8, muted: false, solo: false, shown: true },
-  { id: 'guitar', name: 'Guitar', level: 0.8, muted: false, solo: false, shown: false },
+  { id: 'guitar', name: 'Guitar', level: 0.8, muted: false, solo: false, shown: true },
   { id: 'piano', name: 'Piano', level: 0.8, muted: false, solo: false, shown: true },
+  { id: 'other', name: 'Other', level: 0.8, muted: false, solo: false, shown: false },
   { id: 'rest', name: 'Rest', level: 0.8, muted: false, solo: false, shown: true },
 ]
+
+/** Saved mixer settings, with any stems added since they were saved. */
+export const withAllStems = (saved?: Stem[]): Stem[] => initialStems.map((s) => saved?.find((x) => x.id === s.id) ?? s)
 
 export function formatTime(seconds: number, precise = false): string {
   const m = Math.floor(seconds / 60)

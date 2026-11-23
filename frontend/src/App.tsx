@@ -24,7 +24,7 @@ import {
   type Recent,
 } from './lib/storage'
 import type { Stem, Track } from './lib/types'
-import { formatTime, initialStems } from './lib/types'
+import { formatTime, initialStems, withAllStems } from './lib/types'
 
 const round2 = (v: number) => Math.round(v * 100) / 100
 /** YouTube mode and file mode are separate pages; see lib/routes.ts. */
@@ -80,7 +80,7 @@ function App() {
     setPitch(saved?.pitch ?? 0)
     setCents(saved?.cents ?? 0)
     setPreservePitch(saved?.preservePitch ?? true)
-    setStems(saved?.stems ?? initialStems)
+    setStems(withAllStems(saved?.stems))
     setMirrored(saved?.mirrored ?? false)
     setZoom(saved?.zoom ?? 1)
     setHydratedId(loaded.id)

@@ -25,6 +25,15 @@
     <button id="run" disabled>Separate</button>
     <button id="cancel" disabled>Cancel</button>
     <p>Page responsiveness: <span id="fps">–</span></p>
+    <section id="engine-test" hidden>
+      <h2>Engine (stems in the player)</h2>
+      <button id="play">Play / pause</button>
+      <label>Speed <select id="speed"><option>1</option><option selected>0.75</option><option>0.5</option></select></label>
+      <label>Pitch <select id="pitch"><option>0</option><option>2</option><option>-2</option></select></label>
+      <label><input id="stems-on" type="checkbox" checked /> Stems on</label>
+      <div id="mutes"></div>
+      <p id="clock"></p>
+    </section>
     <h2>Log</h2>
     <pre id="log"></pre>
     <div id="stems"></div>

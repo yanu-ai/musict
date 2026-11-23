@@ -4,6 +4,9 @@
 //   3. Cancel stops it.
 // Delete this file and spike.html once separation is wired into the app.
 
+import { AudioEngine } from './audio/engine'
+import { PLAYBACK_STEMS, stemGains } from './audio/stems'
+import { initialStems, type Stem } from './lib/types'
 import { BrowserSeparator } from './separation/browserSeparator'
 import type { StereoAudio } from './separation/separator'
 
@@ -158,6 +161,71 @@ cancelButton.addEventListener('click', () => controller?.abort())
 
 // For automated runs: spike.html?audio=<url>&start=30&length=30[&priority=10-18][&background=1][&cancelAfter=5]
 // The model must already be cached, since automation can't answer the download prompt.
+/**
+ * Engine mode (?engine=1): the real flow. Load the whole song into the AudioEngine,
+ * separate it with the loop (start..start+length) first, play the stems as soon as the
+ * loop is ready, then stop separating (to save time while testing).
+ */
+async function engineTest(file: File) {
+  const start = Number(startInput.value)
+  const loop = { start, end: start + Number(lengthInput.value) }
+  const engine = new AudioEngine()
+  const section = $<HTMLElement>('engine-test')
+  section.hidden = false
+  let mixer: Stem[] = initialStems.map((s) => ({ ...s, shown: s.id !== 'rest' })) // every stem gets its own mute
+  const stemsOn = $<HTMLInputElement>('stems-on')
+  const applyGains = () => engine.setStemGains(stemGains(mixer, stemsOn.checked))
+  $<HTMLDivElement>('mutes').replaceChildren(
+    ...PLAYBACK_STEMS.map((name) => {
+      const label = document.createElement('label')
+      const box = document.createElement('input')
+      box.type = 'checkbox'
+      box.onchange = () => {
+        mixer = mixer.map((s) => (s.id === name ? { ...s, muted: box.checked } : s))
+        applyGains()
+      }
+      label.append(box, ` mute ${name}`)
+      return label
+    }),
+  )
+  stemsOn.onchange = applyGains
+  $<HTMLSelectElement>('speed').onchange = (e) => engine.setRate(Number((e.target as HTMLSelectElement).value))
+  $<HTMLSelectElement>('pitch').onchange = (e) => engine.setPitch(Number((e.target as HTMLSelectElement).value))
+  let playing = false
+  $<HTMLButtonElement>('play').onclick = () => {
+    playing = !playing
+    if (playing) void engine.play()
+    else engine.pause()
+  }
+  setInterval(() => ($<HTMLParagraphElement>('clock').textContent = `${engine.currentTime.toFixed(1)} s · stems: ${engine.hasStems}`), 250)
+  Object.assign(window, { engine }) // for poking at it from the console
+
+  log(`Engine: loading ${file.name}`)
+  await engine.load(file)
+  engine.setRate(0.75)
+  engine.setLoop(loop)
+  engine.seek(loop.start)
+  const audio = engine.audio!
+  log(`Engine: loaded ${engine.duration.toFixed(1)}s at ${audio.sampleRate} Hz; separating with ${loop.start}-${loop.end}s first`)
+
+  const started = performance.now()
+  controller = new AbortController()
+  const job = new BrowserSeparator().separate(audio, {
+    priority: loop,
+    signal: controller.signal,
+    onProgress: ({ phase, fraction }) => phase !== 'download' && fraction % 0.1 < 0.02 && log(`${phase} ${Math.round(fraction * 100)}%`),
+    onPartial: async ({ stems, ready }) => {
+      log(`LOOP READY after ${((performance.now() - started) / 1000).toFixed(1)}s · ready ${ready.map((r) => `${r.start.toFixed(1)}-${r.end.toFixed(1)}s`).join(', ')}`)
+      const t = performance.now()
+      await engine.setStems(stems, ready)
+      applyGains()
+      log(`Stems loaded into the engine in ${Math.round(performance.now() - t)} ms; press Play`)
+      controller?.abort() // testing only: skip the rest of the song
+    },
+  })
+  await job.result.catch((e) => log(`Separation stopped: ${e instanceof Error ? e.message : e}`))
+}
+
 describeEnvironment().then(async () => {
   for (const key of ['start', 'length']) {
     const value = params.get(key)
@@ -168,6 +236,8 @@ describeEnvironment().then(async () => {
   const cancelAfter = Number(params.get('cancelAfter'))
   if (cancelAfter) setTimeout(() => controller?.abort(), cancelAfter * 1000)
   const response = await fetch(audio)
-  await run(new File([await response.blob()], audio.split('/').pop() ?? 'audio'))
+  const file = new File([await response.blob()], audio.split('/').pop() ?? 'audio')
+  if (params.get('engine') === '1') return engineTest(file)
+  await run(file)
   log('AUTORUN FINISHED')
 })
