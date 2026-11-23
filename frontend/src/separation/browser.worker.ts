@@ -42,18 +42,33 @@ async function loadModelBytes(url: string, cacheName: string): Promise<ArrayBuff
   const cached = await cache.match(url)
   if (cached) return cached.arrayBuffer()
 
-  const response = await fetch(url)
-  if (!response.ok || !response.body) throw new Error(`Model download failed (HTTP ${response.status})`)
+  const host = new URL(url).host
+  const failed = (detail: string) =>
+    new Error(`Couldn't download the separation model from ${host} (${detail}). Check your connection, or whether a content blocker is stopping it.`)
+
+  let response: Response
+  try {
+    // No Referer: Hugging Face refuses downloads referred by *.workers.dev pages (our host),
+    // and it doesn't need to know which page asked.
+    response = await fetch(url, { referrerPolicy: 'no-referrer' })
+  } catch {
+    throw failed('the request was blocked or the network failed')
+  }
+  if (!response.ok || !response.body) throw failed(`HTTP ${response.status}`)
   const total = Number(response.headers.get('Content-Length')) || 0
   const reader = response.body.getReader()
   const chunks: Uint8Array<ArrayBuffer>[] = []
   let received = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-    received += value.length
-    if (total) post({ type: 'download', fraction: received / total })
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      received += value.length
+      if (total) post({ type: 'download', fraction: received / total })
+    }
+  } catch {
+    throw failed('the connection dropped during the download')
   }
   const blob = new Blob(chunks)
   await cache.put(url, new Response(blob))
