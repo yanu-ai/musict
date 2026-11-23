@@ -84,7 +84,7 @@ export function useSeparation({ engine, track, loop, onStemsReady }: Options) {
       if (!announced) latest.current.onStemsReady()
       announced = true
     }
-    let lastPercent = -1
+    let lastUpdate = ''
     setStored({ trackId, kind: 'running', phase: 'prepare', fraction: 0 })
 
     const handle = separator.separate(audio, {
@@ -93,8 +93,9 @@ export function useSeparation({ engine, track, loop, onStemsReady }: Options) {
       signal: controller.signal,
       onProgress: ({ phase, fraction }) => {
         const percent = Math.floor(fraction * 100)
-        if (!current() || percent === lastPercent) return // at most one update per percent
-        lastPercent = percent
+        const update = `${phase} ${percent}`
+        if (!current() || update === lastUpdate) return // at most one update per percent, per phase
+        lastUpdate = update
         setStored({ trackId, kind: 'running', phase, fraction })
       },
       onPartial: async ({ stems, ready }) => {

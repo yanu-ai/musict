@@ -107,7 +107,10 @@ class Job {
           signal?.addEventListener('abort', abort, { once: true })
           worker.onerror = (e) => reject(new Error(e.message || 'The separation worker failed to start.'))
           worker.onmessage = ({ data }: MessageEvent<WorkerMessage>) => {
-            if (data.type === 'download') return onProgress?.({ phase: 'download', fraction: data.fraction })
+            if (data.type === 'download') {
+              // Once downloaded, the model still takes a few seconds to load: show that as "prepare".
+              return onProgress?.(data.fraction >= 1 ? { phase: 'prepare', fraction: 0 } : { phase: 'download', fraction: data.fraction })
+            }
             signal?.removeEventListener('abort', abort)
             if (data.type === 'error') reject(new Error(data.message))
             else resolve(data)
