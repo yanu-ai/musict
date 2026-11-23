@@ -1,8 +1,8 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Connect, type Plugin } from 'vite'
+import { defaultClientConditions, defineConfig, type Connect, type Plugin } from 'vite'
 
-// Served from the root of its own domain on Cloudflare Pages.
+// Served from the root of its own domain on Cloudflare.
 const base = '/'
 
 /**
@@ -28,4 +28,9 @@ function crossOriginIsolation(): Plugin {
 export default defineConfig({
   base,
   plugins: [react(), tailwindcss(), crossOriginIsolation()],
+  resolve: {
+    // Use ONNX Runtime's build that loads its 29.5 MB engine binary from a URL we give it
+    // (jsDelivr), instead of bundling it: Cloudflare rejects files over 25 MiB.
+    conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions],
+  },
 })

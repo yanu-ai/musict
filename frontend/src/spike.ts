@@ -11,7 +11,6 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const fileInput = $<HTMLInputElement>('file')
 const startInput = $<HTMLInputElement>('start')
 const lengthInput = $<HTMLInputElement>('length')
-const backendSelect = $<HTMLSelectElement>('backend')
 const runButton = $<HTMLButtonElement>('run')
 const cancelButton = $<HTMLButtonElement>('cancel')
 const fpsEl = $<HTMLSpanElement>('fps')
@@ -42,7 +41,6 @@ async function describeEnvironment() {
   log(`Browser: ${navigator.userAgent}`)
   log(`Cross-origin isolated: ${crossOriginIsolated}`)
   log(`WebGPU: ${adapter ? 'available' : 'not available'}`)
-  backendSelect.value = 'wasm'
 }
 
 /** Decodes the file and cuts out the clip at the file's own sample rate (the separator resamples). */
@@ -97,11 +95,16 @@ function showStem(name: string, audio: StereoAudio) {
 }
 
 let controller: AbortController | null = null
+const params = new URLSearchParams(location.search)
 
 async function run(given?: File) {
   const file = given ?? fileInput.files?.[0]
   if (!file) return
-  const separator = new BrowserSeparator({ backend: backendSelect.value as 'wasm' | 'webgpu' })
+  const separator = new BrowserSeparator()
+  // Optional: ?priority=10-18 (seconds within the clip) and ?background=1 (2 threads).
+  const [pStart, pEnd] = (params.get('priority') ?? '').split('-').map(Number)
+  const priority = Number.isFinite(pStart) && pEnd > pStart ? { start: pStart, end: pEnd } : null
+  const background = params.get('background') === '1'
   runButton.disabled = true
   cancelButton.disabled = false
   stemsEl.replaceChildren()
@@ -118,13 +121,19 @@ async function run(given?: File) {
     longestGap = 0
     const started = performance.now()
     let lastReport = ''
-    const stems = await separator.separate(clip, {
+    log(`Priority: ${priority ? `${priority.start}-${priority.end}s` : 'none'} · ${background ? 'background (2 threads)' : 'foreground (4 threads)'}`)
+    const job = separator.separate(clip, {
       signal: controller.signal,
+      priority,
+      background,
       onProgress: ({ phase, fraction }) => {
         const report = `${phase} ${Math.floor(fraction * 10) * 10}%`
         if (report !== lastReport) log((lastReport = report))
       },
+      onPartial: ({ ready }) =>
+        log(`PRIORITY READY after ${((performance.now() - started) / 1000).toFixed(1)}s · ready: ${ready.map((r) => `${r.start.toFixed(1)}-${r.end.toFixed(1)}s`).join(', ')}`),
     })
+    const stems = await job.result
     const seconds = (performance.now() - started) / 1000
     const clipSeconds = clip.left.length / clip.sampleRate
     log(`DONE: ${clipSeconds.toFixed(1)}s separated in ${seconds.toFixed(1)}s (${(clipSeconds / seconds).toFixed(2)}x real time)`)
@@ -147,11 +156,10 @@ fileInput.addEventListener('change', () => (runButton.disabled = !fileInput.file
 runButton.addEventListener('click', () => run())
 cancelButton.addEventListener('click', () => controller?.abort())
 
-// For automated runs: spike.html?audio=<url>&backend=wasm&start=30&length=30[&cancelAfter=5]
+// For automated runs: spike.html?audio=<url>&start=30&length=30[&priority=10-18][&background=1][&cancelAfter=5]
 // The model must already be cached, since automation can't answer the download prompt.
-const params = new URLSearchParams(location.search)
 describeEnvironment().then(async () => {
-  for (const key of ['backend', 'start', 'length']) {
+  for (const key of ['start', 'length']) {
     const value = params.get(key)
     if (value) $<HTMLInputElement>(key).value = value
   }

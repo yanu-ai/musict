@@ -22,13 +22,6 @@
     <label>Audio file <input id="file" type="file" accept="audio/*,video/*" /></label>
     <label>Start at (seconds) <input id="start" type="number" value="30" min="0" step="1" /></label>
     <label>Clip length (seconds) <input id="length" type="number" value="30" min="5" max="600" step="5" /></label>
-    <label>
-      Backend
-      <select id="backend">
-        <option value="webgpu">WebGPU (GPU)</option>
-        <option value="wasm">WebAssembly (CPU)</option>
-      </select>
-    </label>
     <button id="run" disabled>Separate</button>
     <button id="cancel" disabled>Cancel</button>
     <p>Page responsiveness: <span id="fps">–</span></p>
