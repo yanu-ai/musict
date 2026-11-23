@@ -1,18 +1,34 @@
 import { AudioLines, FileAudio, Film, Minus, Play, Plus, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { usePlayer } from './audio/usePlayer'
+import { parseYouTubeId } from './audio/youtube'
 import { DropZone } from './components/DropZone'
 import { SectionsPanel } from './components/SectionsPanel'
 import { StemMixer } from './components/StemMixer'
 import { Transport } from './components/Transport'
 import { VideoPanel } from './components/VideoPanel'
 import { Waveform } from './components/Waveform'
-import { useSections, type SectionsState } from './hooks/useSections'
-import { addRecent, listRecents, loadProject, loadRecentFile, removeRecent, requestPersistentStorage, saveProject, type Recent } from './lib/storage'
+import { useSections } from './hooks/useSections'
+import { homeUrl, isYouTubePage, videoIdInUrl, youTubeUrl } from './lib/routes'
+import {
+  addRecent,
+  listRecents,
+  loadProject,
+  loadRecentFile,
+  removeRecent,
+  requestPersistentStorage,
+  saveHandoff,
+  saveProject,
+  takeHandoff,
+  type CarriedWork,
+  type Recent,
+} from './lib/storage'
 import type { Stem, Track } from './lib/types'
 import { formatTime, initialStems } from './lib/types'
 
 const round2 = (v: number) => Math.round(v * 100) / 100
+/** YouTube mode and file mode are separate pages; see lib/routes.ts. */
+const youTubePage = isYouTubePage()
 
 function App() {
   const [speed, setSpeed] = useState(1)
@@ -30,7 +46,7 @@ function App() {
   const [hydratedId, setHydratedId] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   /** Work to bring along when switching from a YouTube video to the user's audio file. */
-  const carryOver = useRef<{ from: string; work: SectionsState; speed: number } | null>(null)
+  const carryOver = useRef<CarriedWork | null>(null)
   /** Imported work the user can still shift to line up with the file. */
   const [alignment, setAlignment] = useState<{ from: string; ids: Set<string>; markers: number[]; offset: number } | null>(null)
 
@@ -52,7 +68,7 @@ function App() {
     sec.restore(null)
   }
 
-  const afterLoad = async (loaded: Track | null, file?: File, carried?: typeof carryOver.current) => {
+  const afterLoad = async (loaded: Track | null, file?: File, carried?: CarriedWork | null) => {
     if (!loaded) return
     const saved = await loadProject(loaded.id)
     sec.restore(saved ?? null)
@@ -74,7 +90,10 @@ function App() {
     setRecents(await listRecents())
   }
 
-  const openFile = async (file: File, carried?: typeof carryOver.current) => {
+  const openFile = async (file: File, carried?: CarriedWork | null) => {
+    // Files open on the (isolated) home page: hand this one over and go there.
+    // If it can't be saved, fall back to opening it here, just without fast separation.
+    if (youTubePage && (await saveHandoff(file, carried ?? null))) return location.assign(homeUrl())
     resetWork()
     await afterLoad(await audio.loadFile(file), file, carried)
   }
@@ -97,8 +116,13 @@ function App() {
   }
 
   const openYouTube = async (link: string) => {
+    const videoId = parseYouTubeId(link)
+    // YouTube plays on its own (non-isolated) page. Bad links fall through so the player reports them.
+    if (!youTubePage && videoId) return location.assign(youTubeUrl(videoId))
     resetWork()
-    await afterLoad(await audio.loadYouTube(link))
+    const loaded = await audio.loadYouTube(link)
+    if (loaded) history.replaceState(null, '', youTubeUrl(loaded.id.slice(3)))
+    await afterLoad(loaded)
   }
 
   const openRecent = async (recent: Recent) => {
@@ -109,9 +133,32 @@ function App() {
   }
 
   const closeTrack = () => {
+    if (youTubePage) return location.assign(homeUrl())
     audio.close()
     resetWork()
   }
+
+  // On page load: the YouTube page opens the video in its address; the home page
+  // opens a file handed over from the YouTube page, if any.
+  const started = useRef(false)
+  const startRef = useRef(() => {})
+  useEffect(() => {
+    startRef.current = () => {
+      if (youTubePage) {
+        const videoId = videoIdInUrl()
+        if (videoId) void openYouTube(videoId)
+        else location.replace(homeUrl())
+      } else {
+        void takeHandoff().then((handoff) => handoff && openFile(handoff.file, handoff.carried))
+      }
+    }
+  })
+  useEffect(() => {
+    // Once only, even when React's StrictMode runs effects twice in development.
+    if (started.current) return
+    started.current = true
+    startRef.current()
+  }, [])
 
   // Save work for this track shortly after anything changes.
   useEffect(() => {
