@@ -21,6 +21,17 @@ drums, bass, guitar, piano, other) to hear parts clearly.
   one-time OK for the model download, then optional auto-start for new songs. The
   current loop is separated first and playable early; moving the loop moves the work.
   `StemMixer` faders, mute and solo drive per-stem volumes in the engine.
+- **Known bug (next up):** moving the loop while separation continues causes a short
+  silence when the new loop's stems load (clock keeps counting). Cause: `engine.setStems`
+  drops the node's buffers, then `addBuffers` *copies* the whole song's 12 channels
+  (no transfer list), so the node plays nothing in between: ~0.6–1 s for a 9.5-min song
+  in testing, likely longer under memory pressure. Planned fix: (A) pass a transfer list
+  `node.addBuffers(channels, channels.map((c) => c.buffer))` (also in `load()`), measure;
+  (B) if still audible, gapless swap (append new buffers, jump input by an offset, then
+  `dropBuffers(toSeconds)`); (C) skip reloads when the loop's stems are already loaded.
+  Test with `window.musictEngine` (dev only) + AnalyserNodes on `engine.stemGains`.
+- Separately: soloing/muting in parts not separated yet sounds silent or thin, because
+  only Other carries the mix there. Consider playing the original there instead.
 - YouTube mode can't use stems (YouTube doesn't share raw audio):
   `YouTubePlayer.capabilities.stems` is false. Stems are for uploaded files only.
 - TypeScript pinned to ~6.0 because typescript-eslint doesn't support TS 7 yet.

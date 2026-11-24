@@ -15,6 +15,10 @@ const message = (e: unknown, fallback: string) => (e instanceof UserError ? e.me
  */
 export function usePlayer({ speed, semitones, preservePitch, loop }: Settings) {
   const [engine] = useState(() => new AudioEngine())
+  // Dev only: lets tests and the console inspect the engine. Not in production builds.
+  useEffect(() => {
+    if (import.meta.env.DEV) Object.assign(window, { musictEngine: engine })
+  }, [engine])
   const [player, setPlayer] = useState<Player | null>(null)
   const [track, setTrack] = useState<Track | null>(null)
   const [loading, setLoading] = useState(false)
